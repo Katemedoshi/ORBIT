@@ -1,0 +1,34 @@
+[
+    {
+        "question": "what is your name",
+        "answer": "My name is ORBIT, your desktop assistant.",
+        "tags": [
+            "name",
+            "identity"
+        ]
+    },
+    {
+        "question": "what can you do",
+        "answer": "I can help with tasks, calculations, reminders, web searches, and answer your questions.",
+        "tags": [
+            "capabilities",
+            "help"
+        ]
+    },
+    {
+        "question": "how do I add a task",
+        "answer": "You can say 'add task [your task]' or use the task manager in the tools menu.",
+        "tags": [
+            "task",
+            "add"
+        ]
+    },
+    {
+        "question": "what time is it",
+        "answer": "I can tell you the current time. Just ask 'what time is it?'",
+        "tags": [
+            "time",
+            "current"
+        ]
+    }
+]

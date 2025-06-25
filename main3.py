@@ -15,6 +15,7 @@ import requests
 from PIL import Image, ImageTk
 import platform
 import calendar as cal
+import psutil
 
 class ORBITAssistant:
     def __init__(self, root):
@@ -44,7 +45,7 @@ class ORBITAssistant:
         """Initialize the AI model with error handling"""
         try:
             # Using a larger model - adjust based on your system capabilities
-            self.ai_model = GPT4All("llama-2-7b-gguf-q4_0.gguf", device="cpu")
+            self.ai_model = GPT4All("orca-mini-3b-gguf2-q4_0.gguf", device="cpu")
             self.ai_ready = True
         except Exception as e:
             messagebox.showerror("AI Error", f"Failed to load AI model: {str(e)}")
@@ -806,6 +807,250 @@ class ORBITAssistant:
             self.save_settings()
             self.save_tasks()
             self.root.destroy()
+
+    # New methods added to fix the error
+    def show_system_info(self):
+        """Display system information"""
+        mem = psutil.virtual_memory()
+        system_info = f"""
+        System Information:
+        OS: {platform.system()} {platform.release()}
+        Architecture: {platform.architecture()[0]}
+        Processor: {platform.processor()}
+        Memory: {mem.used//(1024**3)}GB / {mem.total//(1024**3)}GB used
+        Python Version: {platform.python_version()}
+        """
+        messagebox.showinfo("System Info", system_info)
+
+    def word_of_the_day(self):
+        """Show word of the day"""
+        words = [
+            ("Serendipity", "The occurrence of events by chance in a happy way"),
+            ("Ephemeral", "Lasting for a very short time"),
+            ("Quintessential", "Representing the most perfect example"),
+            ("Perpetual", "Never ending or changing"),
+            ("Eloquence", "Fluent and persuasive speaking")
+        ]
+        word, definition = random.choice(words)
+        self.add_message(f"ORBIT: Word of the Day - {word}: {definition}", 'orbit')
+
+    def set_reminder(self, query):
+        """Set a reminder based on user query"""
+        try:
+            # Simple implementation - set reminder for X minutes
+            if 'in' in query and 'minute' in query:
+                parts = query.split()
+                minutes_index = parts.index('minute') - 1
+                minutes = int(parts[minutes_index])
+                reminder = query.split('remind me')[-1].strip()
+                
+                def create_reminder():
+                    notification.notify(
+                        title="ORBIT Reminder",
+                        message=reminder,
+                        timeout=10
+                    )
+                
+                threading.Timer(minutes * 60, create_reminder).start()
+                self.add_message(f"ORBIT: Reminder set for {minutes} minute(s)", 'orbit')
+            else:
+                self.add_message("ORBIT: Please specify time in minutes (e.g. 'remind me in 5 minutes to take a break')", 'orbit')
+        except Exception as e:
+            self.add_message(f"ORBIT: Error setting reminder: {str(e)}", 'orbit')
+
+    def toggle_theme(self):
+        """Toggle between light and dark theme"""
+        current_theme = self.settings['theme']
+        new_theme = 'dark' if current_theme == 'light' else 'light'
+        self.settings['theme'] = new_theme
+        self.save_settings()
+        self.setup_theme()
+        self.add_message(f"ORBIT: Switched to {new_theme} theme", 'orbit')
+
+    def open_browser(self):
+        """Open default web browser"""
+        webbrowser.open("https://www.google.com")
+        self.add_message("ORBIT: Opened web browser", 'orbit')
+
+    def play_music(self):
+        """Open music directory"""
+        music_path = self.settings.get('music_path', os.path.expanduser('~/Music'))
+        try:
+            os.startfile(music_path)
+            self.add_message(f"ORBIT: Opened music folder: {music_path}", 'orbit')
+        except Exception as e:
+            self.add_message(f"ORBIT: Error opening music folder: {str(e)}", 'orbit')
+
+    def show_task_manager(self):
+        """Show task manager window"""
+        task_window = tk.Toplevel(self.root)
+        task_window.title("Task Manager")
+        task_window.geometry("500x400")
+
+        # Task list
+        self.task_listbox = tk.Listbox(
+            task_window,
+            font=('Helvetica', 12),
+            selectmode=tk.SINGLE
+        )
+        self.task_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Populate with existing tasks
+        for task in self.tasks:
+            self.task_listbox.insert(tk.END, task)
+
+        # Button frame
+        button_frame = tk.Frame(task_window)
+        button_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        # Add task button
+        tk.Button(
+            button_frame,
+            text="Add Task",
+            command=self.add_task_dialog
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Remove task button
+        tk.Button(
+            button_frame,
+            text="Remove Task",
+            command=self.remove_task
+        ).pack
+    def show_task_manager(self):
+        """Show task manager window"""
+        task_window = tk.Toplevel(self.root)
+        task_window.title("Task Manager")
+        task_window.geometry("500x400")
+
+        # Task list
+        self.task_listbox = tk.Listbox(
+            task_window,
+            font=('Helvetica', 12),
+            selectmode=tk.SINGLE
+        )
+        self.task_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Populate with existing tasks
+        for task in self.tasks:
+            self.task_listbox.insert(tk.END, task)
+
+        # Button frame
+        button_frame = tk.Frame(task_window)
+        button_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        # Add task button
+        tk.Button(
+            button_frame,
+            text="Add Task",
+            command=self.add_task_dialog
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Remove task button
+        tk.Button(
+            button_frame,
+            text="Remove Task",
+            command=self.remove_task
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Complete task button
+        tk.Button(
+            button_frame,
+            text="Mark Complete",
+            command=self.complete_task
+        ).pack(side=tk.LEFT, padx=5)
+
+    def add_task_dialog(self):
+        """Show dialog to add a new task"""
+        task = simpledialog.askstring("Add Task", "Enter task description:")
+        if task:
+            self.tasks.append(task)
+            self.task_listbox.insert(tk.END, task)
+            self.save_tasks()
+            self.add_message(f"ORBIT: Added task: {task}", 'orbit')
+
+    def remove_task(self):
+        """Remove selected task"""
+        selection = self.task_listbox.curselection()
+        if selection:
+            task = self.task_listbox.get(selection)
+            self.tasks.remove(task)
+            self.task_listbox.delete(selection)
+            self.save_tasks()
+            self.add_message(f"ORBIT: Removed task: {task}", 'orbit')
+
+    def complete_task(self):
+        """Mark selected task as complete"""
+        selection = self.task_listbox.curselection()
+        if selection:
+            task = self.task_listbox.get(selection)
+            self.task_listbox.itemconfig(selection, {'bg': '#d4edda', 'fg': '#155724'})
+            self.add_message(f"ORBIT: Completed task: {task}", 'orbit')
+
+    def add_task(self, query):
+        """Add task from voice/chat command"""
+        task = query.replace('add task', '').replace('new task', '').strip()
+        if task:
+            self.tasks.append(task)
+            self.save_tasks()
+            self.add_message(f"ORBIT: Added task: {task}", 'orbit')
+        else:
+            self.add_message("ORBIT: Please specify a task to add", 'orbit')
+
+    def search_web(self, query):
+        """Search the web based on query"""
+        search_terms = query.replace('search', '').replace('look up', '').strip()
+        if search_terms:
+            url = f"https://www.google.com/search?q={search_terms.replace(' ', '+')}"
+            webbrowser.open(url)
+            self.add_message(f"ORBIT: Searching for: {search_terms}", 'orbit')
+        else:
+            self.add_message("ORBIT: Please specify what to search for", 'orbit')
+
+    def open_application(self, query):
+        """Open application based on query"""
+        app_name = query.replace('open', '').replace('launch', '').strip().lower()
+        
+        # Map common application names to their executable names
+        app_map = {
+            'notepad': 'notepad.exe',
+            'calculator': 'calc.exe',
+            'paint': 'mspaint.exe',
+            'word': 'winword.exe',
+            'excel': 'excel.exe',
+            'powerpoint': 'powerpnt.exe',
+            'chrome': 'chrome.exe',
+            'firefox': 'firefox.exe',
+            'edge': 'msedge.exe'
+        }
+        
+        if app_name in app_map:
+            try:
+                subprocess.Popen(app_map[app_name])
+                self.add_message(f"ORBIT: Opening {app_name}", 'orbit')
+            except Exception as e:
+                self.add_message(f"ORBIT: Error opening {app_name}: {str(e)}", 'orbit')
+        else:
+            self.add_message(f"ORBIT: I don't know how to open {app_name}", 'orbit')
+
+    def get_time(self):
+        """Get current time"""
+        current_time = datetime.datetime.now().strftime("%H:%M:%S")
+        self.add_message(f"ORBIT: The current time is {current_time}", 'orbit')
+
+    def get_date(self):
+        """Get current date"""
+        current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")
+        self.add_message(f"ORBIT: Today is {current_date}", 'orbit')
+
+    def start_background_tasks(self):
+        """Start background tasks like checking for reminders"""
+        def check_reminders():
+            # This would check for scheduled reminders and notify
+            pass
+        
+        # Run every minute
+        reminder_thread = threading.Thread(target=check_reminders, daemon=True)
+        reminder_thread.start()
 
 if __name__ == "__main__":
     root = tk.Tk()

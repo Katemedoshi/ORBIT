@@ -1,0 +1,16 @@
+{
+    "theme": "light",
+    "voice": true,
+    "notifications": true,
+    "ai_enabled": true,
+    "music_path": "C:\\Users\\Ankur Mukhopadhyay/Music",
+    "documents_path": "C:\\Users\\Ankur Mukhopadhyay/Documents",
+    "downloads_path": "C:\\Users\\Ankur Mukhopadhyay/Downloads",
+    "voice_rate": 180,
+    "startup_greeting": true,
+    "water_reminder": false,
+    "word_of_day": true,
+    "voice_enabled": true,
+    "email": "ankurmukhopadhyay2@gmail.com",
+    "password": "IamAnkur_123"
+}

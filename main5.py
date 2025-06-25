@@ -15,21 +15,48 @@ import requests
 from PIL import Image, ImageTk
 import platform
 import calendar as cal
+import psutil
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer, PorterStemmer
+from nltk import pos_tag, ne_chunk
+from nltk.tree import Tree
+from textblob import TextBlob
+import nltk
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+import re
+
+# Download required NLTK data
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('wordnet')
+nltk.download('averaged_perceptron_tagger')
+nltk.download('maxent_ne_chunker')
+nltk.download('words')
 
 class ORBITAssistant:
     def __init__(self, root):
         self.root = root
-        self.root.title("ORBIT Desktop Assistant v3.5")
+        self.root.title("ORBIT Desktop Assistant v4.0 (NLP Enhanced)")
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
         
-        # Initialize components
+        # Initialize NLP components
+        self.setup_nlp()
+        
+        # Initialize other components
         self.setup_ai()
         self.setup_voice()
         self.load_settings()
         
         # Task manager data
         self.tasks = self.load_tasks()
+        
+        # Knowledge base for question answering
+        self.knowledge_base = self.load_knowledge_base()
+        self.setup_tfidf_vectorizer()
         
         # Setup GUI
         self.setup_gui()
@@ -40,11 +67,124 @@ class ORBITAssistant:
         # Start background tasks
         self.start_background_tasks()
     
+    def setup_nlp(self):
+        """Initialize NLP components using NLTK and TextBlob"""
+        # Initialize NLTK components
+        self.stop_words = set(stopwords.words('english'))
+        self.lemmatizer = WordNetLemmatizer()
+        self.stemmer = PorterStemmer()
+        
+        # Initialize text similarity components
+        self.vectorizer = TfidfVectorizer()
+    
+    def extract_entities(self, text):
+        """Extract named entities from text using NLTK"""
+        entities = []
+        blob = TextBlob(text)
+        for word, pos in blob.tags:
+            if pos in ['NNP', 'NNPS']:  # Proper nouns
+                entities.append((word, 'PERSON'))
+        
+        # Additional entity extraction using NLTK's ne_chunk
+        tokenized = word_tokenize(text)
+        tagged = pos_tag(tokenized)
+        chunks = ne_chunk(tagged)
+        
+        for chunk in chunks:
+            if isinstance(chunk, Tree):
+                entity = ' '.join([c[0] for c in chunk])
+                label = chunk.label()
+                entities.append((entity, label))
+        
+        return list(set(entities))  # Remove duplicates
+    
+    def analyze_sentiment(self, text):
+        """Sentiment analysis using TextBlob"""
+        analysis = TextBlob(text)
+        polarity = analysis.sentiment.polarity
+        
+        if polarity > 0.1:
+            return 'positive'
+        elif polarity < -0.1:
+            return 'negative'
+        else:
+            return 'neutral'
+
+    def setup_tfidf_vectorizer(self):
+        """Setup TF-IDF vectorizer with knowledge base"""
+        documents = [q['question'] for q in self.knowledge_base]
+        self.vectorizer.fit(documents)
+    
+    def load_knowledge_base(self):
+        """Load question-answer knowledge base"""
+        default_kb = [
+            {
+                "question": "what is your name",
+                "answer": "My name is ORBIT, your desktop assistant.",
+                "tags": ["name", "identity"]
+            },
+            {
+                "question": "what can you do",
+                "answer": "I can help with tasks, calculations, reminders, web searches, and answer your questions.",
+                "tags": ["capabilities", "help"]
+            },
+            {
+                "question": "how do I add a task",
+                "answer": "You can say 'add task [your task]' or use the task manager in the tools menu.",
+                "tags": ["task", "add"]
+            },
+            {
+                "question": "what time is it",
+                "answer": "I can tell you the current time. Just ask 'what time is it?'",
+                "tags": ["time", "current"]
+            }
+        ]
+        
+        try:
+            with open('knowledge_base.json', 'r') as f:
+                return json.load(f)
+        except:
+            return default_kb
+    
+    def save_knowledge_base(self):
+        """Save knowledge base to file"""
+        with open('knowledge_base.json', 'w') as f:
+            json.dump(self.knowledge_base, f, indent=4)
+    
+    def preprocess_text(self, text):
+        """Preprocess text for NLP tasks"""
+        # Convert to lowercase
+        text = text.lower()
+        
+        # Remove special characters and numbers
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        
+        # Tokenize
+        tokens = word_tokenize(text)
+        
+        # Remove stopwords and lemmatize
+        tokens = [self.lemmatizer.lemmatize(token) for token in tokens if token not in self.stop_words]
+        
+        return ' '.join(tokens)
+    
+    def find_most_similar_question(self, query):
+        """Find the most similar question in knowledge base using TF-IDF and cosine similarity"""
+        query_vec = self.vectorizer.transform([query])
+        doc_vecs = self.vectorizer.transform([q['question'] for q in self.knowledge_base])
+        
+        similarities = cosine_similarity(query_vec, doc_vecs)
+        most_similar_idx = np.argmax(similarities)
+        
+        # Only return if similarity is above threshold
+        if similarities[0, most_similar_idx] > 0.6:
+            return self.knowledge_base[most_similar_idx]['answer']
+        return None
+    
     def setup_ai(self):
         """Initialize the AI model with error handling"""
         try:
             # Using a larger model - adjust based on your system capabilities
-            self.ai_model = GPT4All("llama-2-7b-gguf-q4_0.gguf", device="cpu")
+            self.ai_model = GPT4All("orca-mini-3b-gguf2-q4_0.gguf", device="cpu")
             self.ai_ready = True
         except Exception as e:
             messagebox.showerror("AI Error", f"Failed to load AI model: {str(e)}")
@@ -142,6 +282,9 @@ class ORBITAssistant:
         tools_menu = tk.Menu(menubar, tearoff=0)
         tools_menu.add_command(label="System Info", command=self.show_system_info)
         tools_menu.add_command(label="Word of the Day", command=self.word_of_the_day)
+        tools_menu.add_command(label="Task Manager", command=self.show_task_manager)
+        tools_menu.add_command(label="Calculator", command=self.show_calculator)
+        tools_menu.add_command(label="Calendar", command=self.show_calendar)
         menubar.add_cascade(label="Tools", menu=tools_menu)
         
         # Settings menu
@@ -339,7 +482,7 @@ class ORBITAssistant:
         self.voice_btn.config(state=tk.NORMAL)
     
     def process_input(self, event=None):
-        """Process user input"""
+        """Enhanced process_input with NLP capabilities"""
         query = self.user_input.get().strip()
         if not query:
             return
@@ -347,29 +490,196 @@ class ORBITAssistant:
         self.add_message(f"You: {query}", 'user')
         self.user_input.delete(0, tk.END)
         
-        # Process commands
-        if query.lower().startswith(('calculate', 'what is', 'math', 'solve')):
+        # Preprocess the query
+        processed_query = self.preprocess_text(query)
+        
+        # Analyze sentiment
+        sentiment = self.analyze_sentiment(query)
+        if sentiment == 'negative':
+            self.add_message("ORBIT: I'm sorry you're feeling that way. How can I help?", 'orbit')
+        
+        # Extract entities
+        entities = self.extract_entities(query)
+        if entities:
+            self.log_entities(entities)
+        
+        # First try to find answer in knowledge base
+        kb_answer = self.find_most_similar_question(processed_query)
+        if kb_answer:
+            self.add_message(f"ORBIT: {kb_answer}", 'orbit')
+            return
+        
+        # Process commands with enhanced NLP understanding
+        if self.is_calculation_query(query):
             self.calculate(query)
-        elif query.lower().startswith(('add task', 'new task')):
-            self.add_task(query)
-        elif query.lower().startswith(('open ', 'launch ')):
-            self.open_application(query)
-        elif query.lower().startswith(('search ', 'look up ')):
-            self.search_web(query)
-        elif 'time' in query.lower():
-            self.get_time()
-        elif 'date' in query.lower():
-            self.get_date()
-        elif any(cmd in query.lower() for cmd in ['remind me', 'set reminder']):
-            self.set_reminder(query)
-        elif query.lower().startswith(('open file', 'show file')):
-            self.open_file_dialog()
-        elif query.lower().startswith(('open folder', 'show folder')):
-            self.open_folder_dialog()
+        elif self.is_task_query(query):
+            self.handle_task_query(query)
+        elif self.is_reminder_query(query):
+            self.handle_reminder_query(query)
+        elif self.is_information_query(query):
+            self.handle_information_query(query)
+        elif self.is_application_query(query):
+            self.handle_application_query(query)
         elif self.ai_ready and len(query.split()) > 3:  # Only use AI for complex queries
             self.generate_ai_response(query)
         else:
-            self.add_message("ORBIT: I'm not sure how to help with that", 'orbit')
+            self.add_message("ORBIT: I'm not sure how to help with that. Can you rephrase?", 'orbit')
+    
+    def is_calculation_query(self, query):
+        """Determine if query is a calculation request using NLP"""
+        calc_keywords = ['calculate', 'compute', 'solve', 'what is', 'math', '+', '-', '*', '/']
+        return any(keyword in query.lower() for keyword in calc_keywords)
+    
+    def is_task_query(self, query):
+        """Determine if query is about tasks using NLP"""
+        task_keywords = ['task', 'todo', 'reminder', 'remember', 'add', 'new']
+        return any(keyword in query.lower() for keyword in task_keywords)
+    
+    def is_reminder_query(self, query):
+        """Determine if query is about reminders using NLP"""
+        reminder_keywords = ['remind', 'alert', 'notify', 'remember']
+        time_keywords = ['at', 'in', 'on', 'tomorrow', 'today', 'after']
+        return (any(keyword in query.lower() for keyword in reminder_keywords) and
+                any(keyword in query.lower() for keyword in time_keywords))
+    
+    def is_information_query(self, query):
+        """Determine if query is requesting information using NLP"""
+        info_keywords = ['what', 'when', 'where', 'who', 'why', 'how', 'tell me', 'explain']
+        return any(keyword in query.lower() for keyword in info_keywords)
+    
+    def is_application_query(self, query):
+        """Determine if query is about opening applications using NLP"""
+        app_keywords = ['open', 'launch', 'start', 'run']
+        app_names = ['notepad', 'calculator', 'browser', 'chrome', 'firefox', 'word', 'excel']
+        return (any(keyword in query.lower() for keyword in app_keywords) and
+                any(name in query.lower() for name in app_names))
+    
+    def handle_task_query(self, query):
+        """Handle task-related queries with NLP"""
+        # Using TextBlob for parsing instead of spaCy
+        blob = TextBlob(query.lower())
+        
+        # Extract task description - simple approach
+        task = ""
+        for sentence in blob.sentences:
+            words = sentence.words
+            if 'add' in words or 'create' in words or 'new' in words:
+                task = ' '.join([word for word in words if word not in ['add', 'task', 'create', 'new']])
+                break
+        
+        if not task:
+            # Fallback to simple string replacement
+            task = query.lower().replace('add task', '').replace('new task', '').replace('create task', '').strip()
+        
+        if task:
+            self.tasks.append(task)
+            self.save_tasks()
+            self.add_message(f"ORBIT: Added task: {task}", 'orbit')
+        else:
+            self.add_message("ORBIT: Please specify a task to add", 'orbit')
+    
+    def handle_reminder_query(self, query):
+        """Handle reminder queries with NLP"""
+        # Using NLTK for time entity extraction
+        tokens = word_tokenize(query.lower())
+        tagged = pos_tag(tokens)
+        
+        # Extract time information (simple approach)
+        time_entity = None
+        time_keywords = ['minute', 'hour', 'day', 'tomorrow', 'today']
+        for i, (word, pos) in enumerate(tagged):
+            if word in time_keywords:
+                # Try to get the number before the time keyword
+                if i > 0 and tagged[i-1][1] == 'CD':  # CD = cardinal number
+                    time_entity = f"{tagged[i-1][0]} {word}"
+                else:
+                    time_entity = word
+                break
+        
+        # Extract reminder text (simple approach)
+        reminder_text = ""
+        reminder_keywords = ['remind', 'alert', 'notify']
+        for word in tokens:
+            if word in reminder_keywords:
+                start_idx = tokens.index(word)
+                reminder_text = ' '.join(tokens[start_idx+1:])
+                break
+        
+        if not reminder_text:
+            reminder_text = query.lower().replace('remind me', '').replace('alert me', '').strip()
+        
+        if time_entity and reminder_text:
+            # Simple implementation - would need more sophisticated time parsing
+            if 'minute' in time_entity:
+                try:
+                    minutes = int(re.search(r'\d+', time_entity).group())
+                    self.set_reminder(reminder_text, minutes)
+                except:
+                    self.add_message("ORBIT: I couldn't understand the time. Please specify like 'in 5 minutes'", 'orbit')
+            else:
+                self.add_message(f"ORBIT: I'll remind you to '{reminder_text}' at {time_entity}", 'orbit')
+        else:
+            self.add_message("ORBIT: Please specify both the reminder and time (e.g. 'remind me in 5 minutes to take a break')", 'orbit')
+    
+    def handle_information_query(self, query):
+        """Handle information requests with NLP"""
+        # Using TextBlob for question analysis
+        blob = TextBlob(query.lower())
+        
+        # Identify question type
+        question_type = "general"
+        wh_words = ['what', 'when', 'where', 'who', 'why', 'how']
+        for word in blob.words:
+            if word in wh_words:
+                question_type = word
+                break
+        
+        # Try to answer based on question type
+        if question_type == "what" and "your name" in query.lower():
+            self.add_message("ORBIT: My name is ORBIT, your desktop assistant.", 'orbit')
+        elif question_type == "what" and "time" in query.lower():
+            self.get_time()
+        elif question_type == "what" and "date" in query.lower():
+            self.get_date()
+        elif question_type in ["who", "what"] and "you" in query.lower():
+            self.add_message("ORBIT: I'm ORBIT, your intelligent desktop assistant. I can help with tasks, calculations, and answer questions.", 'orbit')
+        else:
+            # Fall back to AI or web search
+            if self.ai_ready:
+                self.generate_ai_response(query)
+            else:
+                self.search_web(query)
+    
+    def handle_application_query(self, query):
+        """Handle application opening requests with NLP"""
+        # Using NLTK for parsing
+        tokens = word_tokenize(query.lower())
+        tagged = pos_tag(tokens)
+        
+        # Extract application name (simple approach)
+        app_name = ""
+        for i, (word, pos) in enumerate(tagged):
+            if word in ['open', 'launch', 'start']:
+                # Look for the next noun
+                for j in range(i+1, len(tagged)):
+                    if tagged[j][1] in ['NN', 'NNP']:  # Noun
+                        app_name = tagged[j][0]
+                        break
+                break
+        
+        if not app_name:
+            # Fallback to simple string replacement
+            app_name = query.lower().replace('open', '').replace('launch', '').replace('start', '').strip()
+        
+        if app_name:
+            self.open_application(app_name)
+        else:
+            self.add_message("ORBIT: Please specify an application to open", 'orbit')
+    
+    def log_entities(self, entities):
+        """Log extracted entities for debugging"""
+        entity_str = ", ".join([f"{ent[0]} ({ent[1]})" for ent in entities])
+        self.add_message(f"System: Detected entities - {entity_str}", 'system')
     
     def calculate(self, query):
         """Perform calculations"""
@@ -800,11 +1110,198 @@ class ORBITAssistant:
             path_var.set(folder)
             self.settings[setting_key] = folder
     
+    def show_system_info(self):
+        """Display system information"""
+        mem = psutil.virtual_memory()
+        system_info = f"""
+        System Information:
+        OS: {platform.system()} {platform.release()}
+        Architecture: {platform.architecture()[0]}
+        Processor: {platform.processor()}
+        Memory: {mem.used//(1024**3)}GB / {mem.total//(1024**3)}GB used
+        Python Version: {platform.python_version()}
+        """
+        messagebox.showinfo("System Info", system_info)
+
+    def word_of_the_day(self):
+        """Show word of the day"""
+        words = [
+            ("Serendipity", "The occurrence of events by chance in a happy way"),
+            ("Ephemeral", "Lasting for a very short time"),
+            ("Quintessential", "Representing the most perfect example"),
+            ("Perpetual", "Never ending or changing"),
+            ("Eloquence", "Fluent and persuasive speaking")
+        ]
+        word, definition = random.choice(words)
+        self.add_message(f"ORBIT: Word of the Day - {word}: {definition}", 'orbit')
+
+    def set_reminder(self, reminder_text, minutes):
+        """Set a reminder for specified minutes"""
+        def create_reminder():
+            notification.notify(
+                title="ORBIT Reminder",
+                message=reminder_text,
+                timeout=10
+            )
+        
+        threading.Timer(minutes * 60, create_reminder).start()
+        self.add_message(f"ORBIT: Reminder set for {minutes} minute(s)", 'orbit')
+
+    def toggle_theme(self):
+        """Toggle between light and dark theme"""
+        current_theme = self.settings['theme']
+        new_theme = 'dark' if current_theme == 'light' else 'light'
+        self.settings['theme'] = new_theme
+        self.save_settings()
+        self.setup_theme()
+        self.add_message(f"ORBIT: Switched to {new_theme} theme", 'orbit')
+
+    def open_browser(self):
+        """Open default web browser"""
+        webbrowser.open("https://www.google.com")
+        self.add_message("ORBIT: Opened web browser", 'orbit')
+
+    def play_music(self):
+        """Open music directory"""
+        music_path = self.settings.get('music_path', os.path.expanduser('~/Music'))
+        try:
+            os.startfile(music_path)
+            self.add_message(f"ORBIT: Opened music folder: {music_path}", 'orbit')
+        except Exception as e:
+            self.add_message(f"ORBIT: Error opening music folder: {str(e)}", 'orbit')
+
+    def show_task_manager(self):
+        """Show task manager window"""
+        task_window = tk.Toplevel(self.root)
+        task_window.title("Task Manager")
+        task_window.geometry("500x400")
+
+        # Task list
+        self.task_listbox = tk.Listbox(
+            task_window,
+            font=('Helvetica', 12),
+            selectmode=tk.SINGLE
+        )
+        self.task_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Populate with existing tasks
+        for task in self.tasks:
+            self.task_listbox.insert(tk.END, task)
+
+        # Button frame
+        button_frame = tk.Frame(task_window)
+        button_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        # Add task button
+        tk.Button(
+            button_frame,
+            text="Add Task",
+            command=self.add_task_dialog
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Remove task button
+        tk.Button(
+            button_frame,
+            text="Remove Task",
+            command=self.remove_task
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Complete task button
+        tk.Button(
+            button_frame,
+            text="Mark Complete",
+            command=self.complete_task
+        ).pack(side=tk.LEFT, padx=5)
+
+    def add_task_dialog(self):
+        """Show dialog to add a new task"""
+        task = simpledialog.askstring("Add Task", "Enter task description:")
+        if task:
+            self.tasks.append(task)
+            self.task_listbox.insert(tk.END, task)
+            self.save_tasks()
+            self.add_message(f"ORBIT: Added task: {task}", 'orbit')
+
+    def remove_task(self):
+        """Remove selected task"""
+        selection = self.task_listbox.curselection()
+        if selection:
+            task = self.task_listbox.get(selection)
+            self.tasks.remove(task)
+            self.task_listbox.delete(selection)
+            self.save_tasks()
+            self.add_message(f"ORBIT: Removed task: {task}", 'orbit')
+
+    def complete_task(self):
+        """Mark selected task as complete"""
+        selection = self.task_listbox.curselection()
+        if selection:
+            task = self.task_listbox.get(selection)
+            self.task_listbox.itemconfig(selection, {'bg': '#d4edda', 'fg': '#155724'})
+            self.add_message(f"ORBIT: Completed task: {task}", 'orbit')
+
+    def search_web(self, query):
+        """Search the web based on query"""
+        search_terms = query.replace('search', '').replace('look up', '').strip()
+        if search_terms:
+            url = f"https://www.google.com/search?q={search_terms.replace(' ', '+')}"
+            webbrowser.open(url)
+            self.add_message(f"ORBIT: Searching for: {search_terms}", 'orbit')
+        else:
+            self.add_message("ORBIT: Please specify what to search for", 'orbit')
+
+    def open_application(self, app_name):
+        """Open application based on name"""
+        # Map common application names to their executable names
+        app_map = {
+            'notepad': 'notepad.exe',
+            'calculator': 'calc.exe',
+            'paint': 'mspaint.exe',
+            'word': 'winword.exe',
+            'excel': 'excel.exe',
+            'powerpoint': 'powerpnt.exe',
+            'chrome': 'chrome.exe',
+            'firefox': 'firefox.exe',
+            'edge': 'msedge.exe',
+            'browser': 'chrome.exe'
+        }
+        
+        app_name = app_name.lower()
+        if app_name in app_map:
+            try:
+                subprocess.Popen(app_map[app_name])
+                self.add_message(f"ORBIT: Opening {app_name}", 'orbit')
+            except Exception as e:
+                self.add_message(f"ORBIT: Error opening {app_name}: {str(e)}", 'orbit')
+        else:
+            self.add_message(f"ORBIT: I don't know how to open {app_name}", 'orbit')
+
+    def get_time(self):
+        """Get current time"""
+        current_time = datetime.datetime.now().strftime("%H:%M:%S")
+        self.add_message(f"ORBIT: The current time is {current_time}", 'orbit')
+
+    def get_date(self):
+        """Get current date"""
+        current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")
+        self.add_message(f"ORBIT: Today is {current_date}", 'orbit')
+
+    def start_background_tasks(self):
+        """Start background tasks like checking for reminders"""
+        def check_reminders():
+            # This would check for scheduled reminders and notify
+            pass
+        
+        # Run every minute
+        reminder_thread = threading.Thread(target=check_reminders, daemon=True)
+        reminder_thread.start()
+
     def on_close(self):
         """Handle window close event"""
         if messagebox.askokcancel("Quit", "Do you want to quit ORBIT Assistant?"):
             self.save_settings()
             self.save_tasks()
+            self.save_knowledge_base()
             self.root.destroy()
 
 if __name__ == "__main__":
